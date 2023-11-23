@@ -188,7 +188,7 @@ section '.text' code readable executable
     call    [SetConsoleMode]
     add     rsp, 32
     
-    ; set output console to process vertual terminal escape codes
+    ; set output console to process virtual terminal escape codes
     ; first get the output mode
     sub     rsp, 32
     mov     rcx, qword [WriteHandle]
@@ -302,7 +302,7 @@ endd:
     
     ; set up local stack pointers
     mov LSP, LOCSTACK+4096*8
-    mov LBP, LOCSTACK+4096*8
+    mov LBP, LSP ; base pointer starts at TOS
 
     lea     IP, [cold]  ; now start FORTH from cold start
     NEXT
@@ -4404,14 +4404,14 @@ defword "INCLUDE-FILE",12,0,INCLUDEFILE
         dq TOIN,FETCH,TOR,LIT,0,TOIN,FSTORE
         dq TOR
 INCB:   
-    dq TIB,FETCH,LIT,130,RFETCH,READLINE
-    dq THROW,SWAP,NTIB,FSTORE
+        dq TIB,FETCH,LIT,130,RFETCH,READLINE
+        dq THROW,SWAP,NTIB,FSTORE
         dq ZBRANCH,INC1
         dq LIT,0,TOIN,FSTORE
         dq SOURCE,INTERPRET
         dq BRANCH,INCB
 INC1:   
-    dq FROMR,CLOSEFILE,THROW
+        dq FROMR,CLOSEFILE,THROW
         dq FROMR,TOIN,FSTORE,FROMR,NTIB,FSTORE
         dq FROMR,TIB,FSTORE,FROMR,SOURCEID,FSTORE
         dq EXIT
@@ -4420,10 +4420,13 @@ defword "INCLUDED",8,0,INCLUDED
 ; ( i*x a u -- j*x )
 ; R/O OPEN-FILE THROW INCLUDE-FILE ;
         ;dq RO,OPENFILE,THROW,INCLUDEFILE
-    dq RO,OPENFILE,LIT,0,EQUAL,ZBRANCH,NOPE
-    dq INCLUDEFILE,BRANCH,YEP
+        dq TWODUP,TWOTOR,RO,OPENFILE,LIT,0,EQUAL,ZBRANCH,NOPE
+        dq INCLUDEFILE,TWORDROP,BRANCH,YEP
 NOPE:
-    dq DROP
+        dq DROP
+        dq DOSTRING,18
+        db "CANNOT OPEN FILE: ",0,0,0,0,0,0
+        dq TYPEF,TWOFROMR,TYPEF
 YEP:
         dq EXIT
 
