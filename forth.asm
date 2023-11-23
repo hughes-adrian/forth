@@ -113,22 +113,24 @@ vlink = name_#lbl
     dq EXIT
 }
 
-NULL   equ 0
+NULL   equ   0
 STDOUT equ -11
 STDIN  equ -10
 
 section '.bss' data readable writeable
 
-ADRIAN_VERSION     = 1
-return_stack_size  = 8192
-float_stack_size   = 4096
-buffer_size        = 4096
+ADRIAN_VERSION             = 1
+return_stack_size          = 8192
+float_stack_size           = 4096
+buffer_size                = 4096
 initial_data_segment_size  = 262144
 
 DS equ rsp
 RS equ rbp
-FSP equ r13
+FSP equ r12
 IP equ rsi
+LSP equ r13
+LBP equ r14
 
 align 8
 return_stack:
@@ -297,6 +299,10 @@ endd:
 
     ; save base of float stack to FSP
     mov     FSP, float_stack_top
+    
+    ; set up local stack pointers
+    mov LSP, LOCSTACK+4096*8
+    mov LBP, LOCSTACK+4096*8
 
     lea     IP, [cold]  ; now start FORTH from cold start
     NEXT
@@ -340,15 +346,15 @@ struc CONSOLE_FONT_INFO  {
 }
 
 align 8
-    WriteHandle     dq 0
-    ReadHandle      dq 0
-    HeapHandle      dq 0
-    Written         dq 0
-    key_scratch     dq 0
-    emit_scratch    dq 0
-    BasePtr         dq 0
-    HeapBase        dq 0
-    VirtualBase     dq 0
+WriteHandle     dq 0
+ReadHandle      dq 0
+HeapHandle      dq 0
+Written         dq 0
+key_scratch     dq 0
+emit_scratch    dq 0
+BasePtr         dq 0
+HeapBase        dq 0
+VirtualBase     dq 0
 console CONSOLE_FONT_INFO
 
 ; define the word flags
@@ -397,20 +403,64 @@ DODOES:
 align 8
 ex_handl_start:
 cold:
-    dq ARGC
+    dq ARGC,TOR
 coldb:
-    dq QDUP,ZBRANCH,colde
-    dq ARGV,OVER,ARGC,SWAP,MINUS,ONEPLUS
+    dq RFETCH,ZBRANCH,colde
+    dq ARGV,RFETCH,ARGC,SWAP,MINUS,ONEPLUS
     dq CELLS,MINUS,FETCH,DUPF,STRLEN,INCLUDED
-    dq LIT,1,MINUS
+    dq FROMR,LIT,1,MINUS,TOR
     dq BRANCH,coldb
 colde:
-    dq LIT,msg,LIT,msglen,TYPEF
+    dq RDROP,LIT,msg,LIT,msglen,TYPEF
+cold_thread:
     dq QUIT,BYE
 
+lpMsgBuf: rb 512
+
+defcode "ERRORMSG",8,F_HIDDEN,ERRORMSG,link
+    pop r8
+    mov r15, rsp
+    sub rsp, 32
+    and spl, 0xF0
+    mov rcx, 0
+    call [GetLastError]
+    mov rsp, r15
+    push rax
+    NEXT
+    ; save the stack
+    mov r15, rsp
+    sub rsp, 32
+    and spl, 0xF0
+    ; set up call
+    ;mov rcx,(0x1000 or 0x200) 
+    ;mov rdx, 0
+    ;mov r9, 0
+    ;push lpMsgBuf
+    ;push 256
+    ;push 0
+    ;call [FormatMessage]
+    invoke FormatMessage,(0x1000 or 0x200),0,r8,0,lpMsgBuf,512,0
+    mov rsp, r15
+    push rax
+    mov al, byte [lpMsgBuf]
+    push rax
+    push lpMsgBuf
+    NEXT
+;FormatMessage(
+;        FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+;        FORMAT_MESSAGE_FROM_SYSTEM |
+;        FORMAT_MESSAGE_IGNORE_INSERTS,
+;        NULL,
+;        dw,
+;        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+;        (LPTSTR) &lpMsgBuf,
+;        0, NULL );
+    
 fromError:
     dq LIT,errmsg,LIT,errmsglen,TYPEF
+    dq DUPF,HEX,DOT,DECIMAL,ERRORMSG
     dq DOT
+    ;dq STRLEN,TYPEF,DOT,DOT
     dq QUIT
     
 defvar "STATE",5,0,STATE,0
@@ -429,11 +479,13 @@ defvar "'EXPECT",7,0,TICKEXPECT,ACCEPT
 defvar "'TAP",4,0,TICKTAP,KTAP
 defvar "'ECHO",5,0,TICKECHO,TX
 defvar "SPAN",4,0,SPAN,0
+defvar "PRECISION",9,0,PRECISION,18
 defvar "CURRENT",7,0,CURRENT,v_FORTH
 defvar "CODESPACE",9,0,CSCC,codespace
 ;defvar "CONTEXT",7,0,CONTEXT,0
+defvar "(DEFAULT)",9,F_HIDDEN,PARDEFAULT
 ; create an array of vocs as if it was
-; created with variabel context #vocs cells allot
+; created with variable context #vocs cells allot
 label name_CONTEXT
     dq link              ; link
 link = name_CONTEXT
@@ -446,9 +498,50 @@ label var_CONTEXT
     dq v_FORTH,v_FORTH,v_ROOT,0,0,0,0,0
     dq 0,0,0,0,0,0,0,0
 defconst "#VOCS",5,0,NVOCS,16
-defvar "VOC-LINK",8,0,VOCLINK,name_ROOT
-defvar "LATEST",6,0,LATEST,name_FDUMP ; must point to the last word
+defvar "VOC-LINK",8,0,VOCLINK,name_FORTH
+defvar "LATEST",6,0,LATEST,0;name_FDUMP ; must point to the last word
 ;                                        @ defined in assembly, SYSCALL0
+
+label name_LOCDICT
+    dq link              ; link
+link = name_LOCDICT
+    db 8             ; flags + length byte
+    db "LOC-DICT"                ; the name
+    align 8              ; padding to next 4 byte boundary
+label LOCDICT
+    dq DOVAR,0
+label var_LOCDICT
+    dq 512 dup 0
+
+label name_LOCSTACK
+    dq link              ; link
+link = name_LOCSTACK
+    db 9             ; flags + length byte
+    db "LOC-STACK"                ; the name
+    align 8              ; padding to next 4 byte boundary
+label LOCSTACK
+    dq DOVAR,0
+label var_LOCSTACK
+    dq 4096 dup 0
+
+label name_LOCVEC
+    dq link              ; link
+link = name_CONTEXT
+    db 6+F_HIDDEN             ; flags + length byte
+    db "LOCVEC"                ; the name
+    align 8              ; padding to next 4 byte boundary
+label LOCVEC
+    dq DOVAR,0
+label var_LOCVEC
+    dq TOLOC0,TOLOC1,TOLOC2,TOLOC3,TOLOC4,TOLOC5,TOLOC6,TOLOC7
+
+defvar "LOC-CNT",7,0,LOCCNT,0
+defvar "LOC-OFFSET",10,0,LOCOFFSET,0
+defvar "LOC-FLG",7,0,LOCFLG,0
+defvar "OLD-DP",6,0,OLDDP,0
+defvar "LP",2,0,LP,0
+defvar "LSTATE",6,0,LSTATE,0 ; false
+defvar "LOC-FRAME",9,0,LOCFRAME,0 ; false
 
 defconst "VERSION",7,0,VERSION,ADRIAN_VERSION
 defconst "R0",2,0,RZ,return_stack_top
@@ -461,7 +554,7 @@ defconst "F_IMMED",7,0,__F_IMMED,F_IMMED
 defconst "F_HIDDEN",8,0,__F_HIDDEN,F_HIDDEN
 defconst "F_LENMASK",9,0,__F_LENMASK,F_LENMASK   
 
-defcode "CONSOLE",7,0,CONSOLE,link
+defcode "CONSOLE",7,0,CONSOLE;,link
     frame
     invoke GetConsoleScreenBufferInfo,[WriteHandle],console
     endf
@@ -566,7 +659,7 @@ _TX:
     add     rsp, 48
     ret
 
-defcode "EXIT",4,0,EXIT
+defcode "CODE-EXIT",9,0,EXIT
     POPRSP  IP
     NEXT
 
@@ -581,10 +674,10 @@ defcode "EXECUTE",7,0,EXECUTE
 
 defcode "BYE",3,0,BYE,rootlink
     ; emit a newline
-    ;mov    cl, 10
-    ;call    _TX
-    ;mov    cl, 13
-    ;call    _TX
+    mov    cl, 10
+    call    _TX
+    mov    cl, 13
+    call    _TX
     ;free the heap memory
 
     ;mov     rcx, qword [HeapHandle]
@@ -614,12 +707,13 @@ defcode "BRANCH",6,0,BRANCH
 
 defcode "0BRANCH",7,0,ZBRANCH
         pop     rax
-        cmp     rax, 0
-        jne     LBR1
+        sub     rax, 0
+        je      LBR1
+        add     IP, 8
+        NEXT
+LBR1:   
         mov     rbx, [IP]
         mov     IP, rbx
-        NEXT
-LBR1:   add     IP, 8
         NEXT
     
 defcode "!",1,0,FSTORE
@@ -1062,6 +1156,17 @@ defcode "U<",2,0,ULT
         push rbx
         NEXT
 
+defcode "U>",2,0,UGT
+; ( u u -- t )
+        mov rdx, 0
+        mov rcx, -1
+        pop rbx
+        pop rax
+        cmp rax, rbx
+        cmova rdx, rcx
+        push rdx
+        NEXT
+
 defcode "<",1,0,LTF
 ; ( n n -- t )
 ; 2DUP XOR 0< IF DROP 0< EXIT THEN - 0< ;
@@ -1069,14 +1174,19 @@ defcode "<",1,0,LTF
 ;        dq DROP,ZLT,EXIT
 ;LT1:    dq MINUS,ZLT
 ;        dq EXIT
+        mov rdx, 0
+        mov rcx, -1
         pop rbx
         pop rax
         cmp rax, rbx
-        jl @f
-        push 0
+        cmovl rdx, rcx
+        push rdx
         NEXT
-@@:     push -1
-        NEXT
+        ;jl @f
+        ;push 0
+        ;NEXT
+;@@:     push -1
+;        NEXT
 
 defcode ">",1,0,GTF
 ; ( n n -- t )
@@ -1085,42 +1195,57 @@ defcode ">",1,0,GTF
 ;        dq TWODROP,LIT,0,EXIT
 ;GT1:    dq MINUS,ZGT
 ;        dq EXIT
+        mov rdx, 0
+        mov rcx, -1
         pop rbx
         pop rax
         cmp rax, rbx
-        jg @f
-        push 0
+        cmovg rdx, rcx
+        push rdx
         NEXT
-@@:     push -1
-        NEXT        
+;        jg @f
+;        push 0
+;        NEXT
+;@@:     push -1
+;        NEXT        
 
 defcode ">=",2,0,GTE
 ; ( n n -- t )
 ; 2DUP > ROT ROT EQUAL OR ;
 ;                dq TWODUP,GTF,ROT,ROT,EQUAL,ORF
 ;                dq EXIT
+        mov rdx, 0
+        mov rcx, -1
         pop rbx
         pop rax
         cmp rax, rbx
-        jge @f
-        push 0
+        cmovge rdx, rcx
+        push rdx
         NEXT
-@@:     push -1
-        NEXT        
+;        jge @f
+;        push 0
+;        NEXT
+;@@:     push -1
+;        NEXT        
 
 defcode "<=",2,0,LTE
 ; ( n n -- t )
 ; SWAP 2DUP > ROT ROT EQUAL OR ;
 ;       dq SWAP,TWODUP,GTF,ROT,ROT,EQUAL,ORF
 ;       dq EXIT
+        mov rdx, 0
+        mov rcx, -1
         pop rbx
         pop rax
         cmp rax, rbx
-        jle @f
-        push 0
+        cmovle rdx, rcx
+        push rdx
         NEXT
-@@:     push -1
-        NEXT        
+;        jle @f
+;        push 0
+;        NEXT
+;@@:     push -1
+;        NEXT        
 
 defcode "0>",2,0,ZGT
 ; ( n -- t )
@@ -1596,6 +1721,10 @@ defword "ALLOT",5,0,ALLOT
 ; DP +! ;
                 dq FDP,PLUSSTORE,EXIT
 
+
+defcode "FREE",4,0,FREE
+defcode "RESIZE",6,0,RESIZE
+
 defword "PAD",3,0,PAD
 ; ( -- a )
 ; HERE 80 + ;
@@ -1686,12 +1815,12 @@ cmpb:
     dq ONEMINUS,SWAP,TWOTOR,ZEQ
     dq SWAP,ZEQ,ORF,ZBRANCH,CMP1
     dq TWODROP,TWOFROMR,TWODUP,LTF,ZBRANCH,CMP4
-    dq LIT,1,EXIT
+    dq TWODROP,LIT,1,EXIT
 CMP4:
     dq TWODUP,GTF,ZBRANCH,CMP5
-    dq LIT,-1,EXIT
+    dq TWODROP,LIT,-1,EXIT
 CMP5:
-    dq LIT,0,EXIT
+    dq TWODROP,LIT,0,EXIT
 CMP1:
     dq TWODUP,FETCHBYTE,SWAP,FETCHBYTE
     dq EQUAL,ZBRANCH,cmpe
@@ -1765,25 +1894,25 @@ defword "PACK$",5,0,PACKS
 defword "DIGIT",5,0,DIGIT
 ; ( u -- c )
 ; 9 OVER < 7 AND + 48 + ;
-                dq LIT,9,OVER,LTF,LIT,7,ANDF,PLUS
-                dq LIT,48,PLUS
-                dq EXIT
+     dq LIT,9,OVER,LTF,LIT,7,ANDF,PLUS
+     dq LIT,48,PLUS
+     dq EXIT
 
 defword "EXTRACT",7,0,EXTRACT
 ; ( n base -- n c ) 
 ; 0 SWAP UM/MOD SWAP DIGIT ;
-                dq LIT,0,SWAP,UMDIVMOD
-                dq SWAP,DIGIT
-                dq EXIT
+     dq LIT,0,SWAP,UMDIVMOD
+     dq SWAP,DIGIT
+     dq EXIT
 
 
 defword "HOLD",4,0,HOLD
 ; ( c -- ) 
 ; HLD @ 1 - DUP HLD ! C! ;
-                dq HLD,FETCH,LIT,1
-                dq MINUS,DUPF,HLD
-                dq FSTORE,STOREBYTE
-                dq EXIT
+     dq HLD,FETCH,LIT,1
+     dq MINUS,DUPF,HLD
+     dq FSTORE,STOREBYTE
+     dq EXIT
 
 defword "HOLDS",5,0,HOLDS
 ; ( a u -- ) 
@@ -1829,9 +1958,9 @@ SIGN1:  dq EXIT
 defword "#>",2,0,HASHBRA
 ; ( ud -- b u )
 ; 2DROP HLD ; PAD OVER - ;
-                dq TWODROP,HLD,FETCH
-                dq PAD,OVER,MINUS
-                dq EXIT
+     dq TWODROP,HLD,FETCH
+     dq PAD,OVER,MINUS
+     dq EXIT
 
 defword "STR",3,0,STRF
 ; ( d -- b u )
@@ -2460,7 +2589,7 @@ defcode "(F.)",4,0,PARENFDOT
     FPOP    xmm0
     pop     r8
     sub     rsp, 32
-    mov     rdx, 18
+    mov     rdx, [var_PRECISION]
     call    [_gcvt]
     add     rsp, 32
     
@@ -2973,7 +3102,7 @@ FFEND:  dq DROP,FROMR,LIT,0
 
 defword ">CFA",4,0,TCFA
 ; ( a -- xt )
-; DUP CELL + C; F_LENMASK AND + CELL 1 + + ALIGNED ;
+; DUP CELL + C@ F_LENMASK AND + CELL 1 + + ALIGNED ;
         dq DUPF,CELL,PLUS,FETCHBYTE
         dq LIT,F_LENMASK,ANDF
         dq CELL,LIT,1,PLUS,PLUS
@@ -2991,7 +3120,8 @@ defword "CFA>",4,0,CFATO
 ; LATEST @ BEGIN
 ; ?DUP WHILE 2DUP SWAP < IF NIP EXIT THEN
 ; @ REPEAT DROP 0 ;
-        dq LATEST,FETCH
+       ; dq LATEST,FETCH
+        dq CURRENT,FETCH,FETCH
 CFTB:   dq QDUP,ZBRANCH,CFT1
         dq TWODUP,SWAP,LTF,ZBRANCH,CFT2
         dq NIP,EXIT
@@ -3003,7 +3133,7 @@ defword ">BODY",5,0,TOBODY
 ; ( xt -- dfa )
 ; undefined if used on a word created wth CREATE
 ; CELL+ ;
-        dq CELLPLUS;
+        dq LIT,2,CELLS,PLUS
         dq EXIT
 
 defword "FORGET",6,,FORGET
@@ -3016,8 +3146,9 @@ defword "FORGET",6,,FORGET
 ; FIX to go back to link field from cfa, i.e. xt
         dq BLF,WORDF,FIND
         dq ZBRANCH,FORG1
-        dq CFATO,DUPF,FETCH,DUPF
-        dq LATEST,FSTORE,CURRENT,FETCH,FSTORE
+        dq CFATO,DUPF,FETCH;,DUPF
+        ; dq LATEST,FSTORE
+        dq CURRENT,FETCH,FSTORE
         dq FDP,FSTORE
 FORG1:  dq EXIT
 
@@ -3030,7 +3161,7 @@ defword "HEADER,",7,0,HEADERCOMMA
 ; HERE SWAP CMOVE      ( copy name to dictionary )
 ; HERE R> + ALIGNED DP !    ( add name length and align for padding )
         dq TOUPPER,CURRENT,FETCH,FETCH;LATEST,FETCH
-        dq HERE,LATEST,FSTORE
+       ; dq HERE,LATEST,FSTORE
         dq HERE,CURRENT,FETCH,FSTORE
         dq COMMA,DUPF,DUPF,TOR,COMMABYTE
         dq HERE,SWAP,CMOVEF
@@ -3074,9 +3205,11 @@ defword "DOES>",5,0,DOES
 ; ( -- )
 ; ['] DODOES LITERAL LATEST @ >CFA !
 ; R> LATEST @ >CFA >BODY ! ;
-        dq LIT,DODOES,LATEST,FETCH,TCFA
+        ; dq LIT,DODOES,LATEST,FETCH,TCFA
+        dq LIT,DODOES,CURRENT,FETCH,FETCH,TCFA
         dq FSTORE
-        dq FROMR,LATEST,FETCH,TCFA,TOBODY
+        ; dq FROMR,LATEST,FETCH,TCFA,TOBODY
+        dq FROMR,CURRENT,FETCH,FETCH,TDFA
         dq FSTORE
         dq EXIT
 
@@ -3191,10 +3324,22 @@ defword "]",1,0,RBRAC
 
 defword "HIDDEN",6,0,HIDDEN
 ; ( a -- )
-;  4 + DUP @ F_HIDDEN XOR SWAP !
+;  8 + DUP @ F_HIDDEN XOR SWAP !
         dq LIT,8,PLUS
         dq DUPF,FETCH
-        dq LIT,F_HIDDEN,XORF,SWAP,FSTORE
+        ;dq LIT,F_HIDDEN,INVERT
+        ;dq ANDF,SWAP,FSTORE
+        dq LIT,F_HIDDEN
+        dq XORF,SWAP,FSTORE
+        dq EXIT
+
+defword "UNHIDE",6,0,UNHIDE
+; ( a -- )
+;  8 + DUP @ F_HIDDEN XOR SWAP !
+        dq LIT,8,PLUS
+        dq DUPF,FETCH
+        dq LIT,F_HIDDEN,INVERT
+        dq ANDF,SWAP,FSTORE
         dq EXIT
 
 defword ":",1,0,COLON
@@ -3203,17 +3348,47 @@ defword ":",1,0,COLON
 ; DOCOL , LATEST @ HIDDEN [ ;
         dq BLF,WORDF,COUNT
         dq HEADERCOMMA,LIT,DOCOL
-        dq COMMA,LATEST,FETCH
+        ;dq COMMA,LATEST,FETCH
+        dq COMMA,CURRENT,FETCH,FETCH
         dq HIDDEN,RBRAC,EXIT
 
 defword ";",1,F_IMMED,SEMICOLON
 ; ( -- )
 ; EXIT , LATEST @ HIDDEN ] ;
-        dq STATE,FETCH,ZEQ,ZBRANCH,COL1,EXIT
-COL1:
+        dq STATE,FETCH,ZBRANCH,COLX
+        dq LOCFLG,FETCH,ZBRANCH,COL1
+        dq LIT,0,HERE
+COLB:   dq CELLMINUS,DUPF,FETCH,LIT,DOCOL,NEQUAL,ZBRANCH,COLE
+        dq SWAP,ONEPLUS,SWAP
+        dq DUPF,FETCH,LIT,PARENSDO,EQUAL,ZBRANCH,COL2
+        dq CELL,OVER,LIT,2,CELLS,PLUS,PLUSSTORE
+COL2:   dq DUPF,FETCH,LIT,PARENSLOOP,EQUAL,ZBRANCH,COL3
+        dq CELL,OVER,LIT,2,CELLS,PLUS,PLUSSTORE
+COL3:   dq DUPF,FETCH,LIT,PARENSQDO,EQUAL,ZBRANCH,COL4
+        dq CELL,OVER,LIT,2,CELLS,PLUS,PLUSSTORE
+COL4:   dq DUPF,FETCH,LIT,PARENSPLUSLOOP,EQUAL,ZBRANCH,COL5
+        dq CELL,OVER,LIT,2,CELLS,PLUS,PLUSSTORE
+COL5:   dq DUPF,FETCH,LIT,BRANCH,EQUAL,ZBRANCH,COL6
+        dq CELL,OVER,LIT,2,CELLS,PLUS,PLUSSTORE
+COL6:   dq DUPF,FETCH,LIT,ZBRANCH,EQUAL,ZBRANCH,COL7
+        dq CELL,OVER,LIT,2,CELLS,PLUS,PLUSSTORE
+COL7:   dq DUPF,FETCH,OVER,CELLPLUS,FSTORE
+        dq BRANCH,COLB
+COLE:   dq CELLPLUS,LIT,LOCINIT,SWAP,FSTORE
+        dq ZBRANCH,COL1,CELL,FDP,PLUSSTORE
+COL1:   dq RESETLOCALS
         dq LIT,EXIT,COMMA
-        dq LATEST,FETCH,HIDDEN
-        dq LBRAC,EXIT
+        ;dq LATEST,FETCH,HIDDEN
+        dq CURRENT,FETCH,FETCH,UNHIDE;HIDDEN
+        dq LBRAC
+COLX:   dq EXIT
+
+defword "EXIT",4,F_IMMED,LOCEXIT
+        dq LOCFLG,FETCH,ZBRANCH,EXIT1
+        dq COMPILE,LOCUNWIND
+EXIT1:  dq COMPILE,EXIT
+        dq COMPILE,EXIT
+        dq EXIT
 
 defword "'",1,0,TICK
 ; ( -- xt )
@@ -3254,9 +3429,27 @@ defword "COMPILE,",8,0,COMPILECOMMA
 
 defword "RECURSE",7,F_IMMED,RECURSE
 ; ( -- )
-; LATEST ; >CFA , ;
-        dq LATEST,FETCH,TCFA,COMMA
-        dq EXIT
+; LATEST @ >CFA , ;
+        ;dq LATEST,FETCH,ZBRANCH,RECUR1
+        ;dq LATEST,FETCH,TCFA,COMMA
+;        ;dq CR,LATEST,FETCH,TCFA,DOT
+;        dq BRANCH,RECUR2
+        dq LOCFLG,FETCH,ZBRANCH,RECUR1
+        dq PREVIOUS,DEFINITIONS
+RECUR1: dq CURRENT,FETCH,FETCH,TCFA,COMMA
+        ;dq CR,CURRENT,FETCH,FETCH,TCFA,DOT
+        dq LOCFLG,FETCH,ZBRANCH,RECUR2
+        dq ALSO,LOCVOC,DEFINITIONS
+RECUR2: dq EXIT
+
+defword "RECURSIVE",9,F_IMMED,RECURSIVE
+        dq LATEST,FETCH,ZBRANCH,RECUS1
+        dq LATEST,FETCH,UNHIDE
+        ;dq CR,LATEST,FETCH,DOT
+        dq BRANCH,RECUS2
+RECUS1: dq CURRENT,FETCH,FETCH,UNHIDE
+        ;dq CR,CURRENT,FETCH,FETCH,DOT
+RECUS2: dq EXIT
 
 defword "WORDS",5,0,WORDS,rootlink
 ; ( -- )
@@ -3409,7 +3602,8 @@ IMM1:   dq LIT,0
 IMM2:   dq EXIT
 
 defword "IMMEDIATE",9,0,IMMEDIATE
-                dq LATEST,FETCH,LIT,8,PLUS,DUPF
+               ; dq LATEST,FETCH,LIT,8,PLUS,DUPF
+                dq CURRENT,FETCH,FETCH,LIT,8,PLUS,DUPF
                 dq FETCHBYTE,LIT,F_IMMED,XORF
                 dq SWAP,STOREBYTE
                 dq EXIT
@@ -3588,7 +3782,7 @@ defword "<MARK",5,0,BMARK
 defword "<RESOLVE",8,0,BRESOLVE
 ; ( a -- )
 ; , ;
-                dq COMMA,EXIT
+         dq COMMA,EXIT
 
 ;defword "FOR",3,F_IMMED,FOR
 ; ( -- a )
@@ -3598,7 +3792,7 @@ defword "<RESOLVE",8,0,BRESOLVE
 defword "BEGIN",5,F_IMMED,BEGIN
 ; ( -- a )
 ; <MARK ; IMMEDIATE
-                dq BMARK,EXIT
+         dq BMARK,EXIT
 
 ;defword "NEXT",4,F_IMMED,NEXT
 ; ( a -- ) 
@@ -3608,7 +3802,8 @@ defword "BEGIN",5,F_IMMED,BEGIN
 defword "UNTIL",5,F_IMMED,UNTIL
 ; ( a -- )
 ; COMPILE ?BRANCH <RESOLVE ; IMMEDIATE
-                dq COMPILE,ZBRANCH,BRESOLVE,EXIT
+         ;dq COMPILE,ZBRANCH,BRESOLVE,EXIT
+         dq LIT,ZBRANCH,COMMA,COMMA,EXIT
 
 defword "AGAIN",5,F_IMMED,AGAIN
 ; ( a -- )
@@ -4240,12 +4435,14 @@ defword "INCLUDE",7,0,INCLUDEF
 
 defword "CASE",4,F_IMMED,CASE
 ; ( n -- )
+; push 0 to mark the bottom of the stack
 ; 0 ; IMMEDIATE
+        dq LIT,0,PARDEFAULT,FSTORE
         dq LIT,0,EXIT
 
 defword "OF",2,F_IMMED,OF
 ; ( n t -- n ) 
-; compile over compile = postpone IF compile drop ; IMMEDIATE
+; COMPILE OVER COMPILE = POSTPONE IF COMPILE DROP ; IMMEDIATE
         dq LIT,OVER,COMMA
         dq LIT,EQUAL,COMMA
         dq IFF
@@ -4254,52 +4451,56 @@ defword "OF",2,F_IMMED,OF
 
 defword "ENDOF",5,F_IMMED,ENDOF
 ; ( )
-; [COMPILE] ELSE ; IMMEDIATE
+; POSTPONE ELSE ; IMMEDIATE
         dq ELSEF
         dq EXIT
 
 defword "DEFAULT:",8,F_IMMED,DEFAULTF
     dq LIT,DUPF,COMMA
-    dq OF,EXIT
+    dq OF,LIT,-1,PARDEFAULT,FSTORE,EXIT
     
 defword "ENDCASE",7,F_IMMED,ENDCASE
 ; ( )
-; ['] DROP ,
-; BEGIN ?DUP WHILE postpone THEN REPEAT ; IMMEDIATE
-        dq LIT,DROP,COMMA
+; COMPILE DROP
+; keep compiling then until the 0 marker is found
+; BEGIN ?DUP WHILE POSTPONE THEN REPEAT ; IMMEDIATE
+        dq PARDEFAULT,FETCH,ZBRANCH,EC1
+        dq ENDOF
+EC1:    dq LIT,DROP,COMMA
 ECB:    dq QDUP,ZBRANCH,ECR
         dq THEN
         dq BRANCH,ECB
-ECR:    dq EXIT
+ECR:    dq LIT,0,PARDEFAULT,FSTORE
+        dq EXIT
     
 defcode "F@",2,0,FFETCH
 ; ( a -- r )
-        pop rax
+    pop rax
     movsd xmm0,[rax]
-        FPUSH xmm0
-        NEXT
-
+    FPUSH xmm0
+    NEXT
+  
 defcode "F!",2,0,FLSTORE
 ; ( r a -- )
-        pop rax
+    pop rax
     FPOP xmm0
     movsd [rax],xmm0
-        NEXT
+    NEXT
    
 defcode "FDUP",4,0,FDUP
 ; ( r -- r r )
-        FPOP xmm0
-        FPUSH xmm0
-        FPUSH xmm0
-        NEXT
+    FPOP xmm0
+    FPUSH xmm0
+    FPUSH xmm0
+    NEXT
 
 defcode "FSWAP",5,0,FSWAP
 ; ( r1 r2 -- r2 r1 )
-        FPOP xmm0
-        FPOP xmm1
-        FPUSH xmm1
-        FPUSH xmm0
-        NEXT
+    FPOP xmm0
+    FPOP xmm1
+    FPUSH xmm1
+    FPUSH xmm0
+    NEXT
 
 defcode "FDROP",5,0,FDROP
 ; ( r --  )
@@ -4447,14 +4648,14 @@ defcode "FSQRT",5,,FSQRTF
     NEXT
 
 defcode "FABS",4,0,FABSF
-       FPOP xmm0
-    push rsi
-    sub rsp,40
-       call [_fabs]
-    add rsp,40
-       FPUSH xmm0
-    pop rsi
-       NEXT
+    FPOP xmm0
+    mov r15, rsp
+    sub rsp, 16
+    and spl, 0xF0
+    call [_fabs]
+    mov rsp, r15
+    FPUSH xmm0
+    NEXT
 
 defcode "FCOS",4,0,FCOSF
     FPOP xmm0
@@ -4700,7 +4901,8 @@ defword "FDEPTH",6,0,FDEPTH
 defword "VOCABULARY",10,0,VOCAB
 ; ( parse"a u -- )
 ; here dup
-; create 0 , , \ save the link addr
+; create 0 ,     \ 0 for the word list 
+; ,              \ save the link addr
 ; voc-link @ ,
 ; voc-link !
 ; does> context ! ;
@@ -4801,6 +5003,7 @@ defcode "LOADLIBRARY",11,0,DLOPEN
         pop rcx           ; cstring dll filename
         mov r15, rsp      ; save r15
         sub rsp, 40
+        and spl, 0xF0
         call [LoadLibraryA]
         mov rsp, r15
         push rax
@@ -4811,6 +5014,7 @@ defcode "GETPROCADDR",11,0,GETPROC
         pop rdx            ; cstring func name
         mov r15, rsp
         sub rsp, 40
+        and spl, 0xF0
         call [GetProcAddress]
         mov rsp, r15
         push rax
@@ -4818,18 +5022,22 @@ defcode "GETPROCADDR",11,0,GETPROC
 
 defcode "0CALL",5,0,FCALL0
         pop r8
+        mov r15, rsp
         sub rsp, 32
+        and spl, 0xF0
         call r8
-        add rsp, 32
+        mov rsp, r15
         push rax
         NEXT
 
 defcode "1CALL",5,0,FCALL1
         pop r8
         pop rcx
+        mov r15, rsp
         sub rsp, 32
+        and spl, 0xF0
         call r8
-        add rsp, 32
+        mov rsp, r15
         push rax
         NEXT
 
@@ -4837,9 +5045,11 @@ defcode "2CALL",5,0,FCALL2
         pop r8
         pop rdx
         pop rcx
+        mov r15, rsp
         sub rsp, 32
+        and spl, 0xF0
         call r8
-        add rsp, 32
+        mov rsp, r15
         push rax
         NEXT
 
@@ -4848,9 +5058,11 @@ defcode "3CALL",5,0,FCALL3
         pop r8
         pop rdx
         pop rcx
+        mov r15, rsp
         sub rsp, 32
-        call r9
-        add rsp, 32
+        and spl, 0xF0
+        call r8
+        mov rsp, r15
         push rax
         NEXT
 
@@ -4860,16 +5072,19 @@ defcode "4CALL",5,0,FCALL4
         pop r8
         pop rdx
         pop rcx
+        mov r15, rsp
         sub rsp, 32
-        call rbx
-        add rsp, 32
+        and spl, 0xF0
+        call r8
+        mov rsp, r15
         push rax
         NEXT
 
 defword "CODE",4,0,FCODE
        dq BLF,WORDF,COUNT
        dq HEADERCOMMA,HERE,CELLPLUS
-       dq COMMA,LATEST,FETCH,HIDDEN
+       ;dq COMMA,LATEST,FETCH,HIDDEN
+       dq COMMA,CURRENT,FETCH,FETCH,HIDDEN
        ;dq RBRAC
        dq ALIGNF
        dq EXIT
@@ -4882,8 +5097,222 @@ defword "NEXT",4,0,FNEXT
         dq EXIT
 
 defword "END-CODE",8,0,FENDCODE
-        dq LATEST,FETCH,HIDDEN
+        ;dq LATEST,FETCH,HIDDEN
+        dq CURRENT,FETCH,FETCH,UNHIDE
         ;dq LBRAC
+        dq EXIT
+
+; defword "@LOC0",5,0,ATLOC0
+;         dq LOCBP,FETCH,LIT,1,CELLS
+;         dq MINUS,FETCH
+;         dq EXIT
+defcode "@LOC0",5,0,ATLOC0
+        push qword [LBP - 8]
+        NEXT
+
+; defword "@LOC1",5,0,ATLOC1
+;         dq LOCBP,FETCH,LIT,2,CELLS
+;         dq MINUS,FETCH
+;         dq EXIT
+defcode "@LOC1",5,0,ATLOC1
+        push qword [LBP - 8*2]
+        NEXT
+
+defcode "@LOC2",5,0,ATLOC2
+        push qword [LBP - 8*3]
+        NEXT
+
+defcode "@LOC3",5,0,ATLOC3
+        push qword [LBP - 8*4]
+        NEXT
+
+defcode "@LOC4",5,0,ATLOC4
+        push qword [LBP - 8*5]
+        NEXT
+
+defcode "@LOC5",5,0,ATLOC5
+        push qword [LBP - 8*6]
+        NEXT
+
+defcode "@LOC6",5,0,ATLOC6
+        push qword [LBP - 8*7]
+        NEXT
+
+defcode "@LOC7",5,0,ATLOC7
+        push qword [LBP - 8*8]
+        NEXT
+
+defcode "LOC-SP",6,0,LOCSP
+        push LSP
+        NEXT
+
+defcode "LOC-BP",6,0,LOCPB
+        push LBP
+        NEXT
+
+; defword ">L",2,0,TOL
+;         dq LIT,-8,LOCSP,PLUSSTORE,LOCSP
+;         dq FETCH,FSTORE
+;         dq EXIT
+; 
+; defword "<L",2,0,FROML
+;         dq LOCSP,FETCH,FETCH
+;         dq LIT,8,LOCSP,PLUSSTORE
+;         dq EXIT
+
+defcode ">L",2,0,TOL
+        sub LSP, 8
+        pop qword [LSP]
+        NEXT
+
+defcode "<L",2,0,FROML
+        ;mov rax,[LSP]
+        push qword [LSP]
+        add LSP, 8
+        NEXT
+
+defcode ">L0",3,0,TOLOC0
+        ;pop rax
+        pop qword [LBP-8];, rax 
+        NEXT
+
+defcode ">L1",3,0,TOLOC1
+        pop rax
+        mov [LBP-2*8], rax 
+        NEXT
+
+defcode ">L2",3,0,TOLOC2
+        pop rax
+        mov [LBP-3*8], rax 
+        NEXT
+
+defcode ">L3",3,0,TOLOC3
+        pop rax
+        mov [LBP-4*8], rax 
+        NEXT
+
+defcode ">L4",3,0,TOLOC4
+        pop rax
+        mov [LBP-5*8], rax 
+        NEXT
+
+defcode ">L5",3,0,TOLOC5
+        pop rax
+        mov [LBP-6*8], rax 
+        NEXT
+
+defcode ">L6",3,0,TOLOC6
+        pop rax
+        mov [LBP-7*8], rax 
+        NEXT
+
+defcode ">L7",3,0,TOLOC7
+        pop rax
+        mov [LBP-8*8], rax 
+        NEXT
+
+; defword "LOC-UNWIND",10,0,LOCUNWIND
+;         dq LOCBP,FETCH,LOCSP,FSTORE
+;         dq FROML,LOCBP,FSTORE
+;         dq EXIT
+defcode "LOC-UNWIND",10,0,LOCUNWIND
+  ; loc-bp @ loc-sp ! loc-sp @ @ loc-bp ! 8 loc-sp +! ; 
+        mov LSP, LBP
+        mov LBP, [LSP]
+        add LSP, 8
+        NEXT
+
+; defword "LOC-INIT",8,0,LOCINIT
+;         dq LOCBP,FETCH,TOL
+;         dq LOCSP,FETCH,LOCBP,FSTORE
+;         dq EXIT
+defcode "LOC-INIT",8,0,LOCINIT
+        sub LSP, 8
+        mov [LSP], LBP
+        mov LBP, LSP
+        sub LSP, 8*16
+        NEXT
+
+defword "RESET-LOCALS",12,F_IMMED,RESETLOCALS
+        dq LOCFLG,FETCH,ZBRANCH,resloc
+        dq LIT,LOCUNWIND,COMMA
+        dq LIT,0,LOCCNT,FSTORE
+        dq LIT,0,LOCOFFSET,FSTORE
+        dq FFALSE,LOCFLG,FSTORE
+        dq FFALSE,LOCFRAME,FSTORE
+        dq LIT,0,CONTEXT,FETCH,FSTORE
+        dq LIT,0,LP,FSTORE
+        dq PREVIOUS,DEFINITIONS
+resloc: dq EXIT
+
+defword "START-LOCALS",12,0,STARTLOCALS
+        dq FTRUE,LOCFLG,FSTORE
+        dq LOCFRAME,FETCH,ZEQ,ZBRANCH,staloc
+        dq LOCDICT,LP,FSTORE
+        dq ALSO,LOCVOC,DEFINITIONS
+staloc: dq HERE,OLDDP,FSTORE
+        dq LP,FETCH,FDP,FSTORE
+        dq EXIT
+
+defword "STOP-LOCALS",11,0,STOPLOCALS
+        dq HERE,LP,FSTORE
+        dq OLDDP,FETCH,FDP,FSTORE
+        dq LOCFRAME,FETCH,ZEQ,ZBRANCH,stoloc
+        ;dq LIT,LOCINIT,COMMA
+        dq FTRUE,LOCFRAME,FSTORE
+stoloc: dq LOCCNT,FETCH,LIT,0
+        dq PARENSQDO,stoex
+sto1:   dq LOCVEC,I,CELLS,PLUS,FETCH,COMMA
+        dq PARENSLOOP,sto1
+stoex:  dq EXIT
+
+defword "CREATE-LOCAL",12,0,CREATELOCAL
+        dq HEADERCOMMA,LIT,DOCOL,COMMA
+        dq LOCOFFSET,FETCH
+        dq LIT,0,OVER,EQUAL,ZBRANCH,CL1
+        dq DROP,COMPILE,ATLOC0,BRANCH,CLEX
+CL1:    dq LIT,1,OVER,EQUAL,ZBRANCH,CL2
+        dq DROP,COMPILE,ATLOC1,BRANCH,CLEX
+CL2:    dq LIT,2,OVER,EQUAL,ZBRANCH,CL3
+        dq DROP,COMPILE,ATLOC2,BRANCH,CLEX
+CL3:    dq LIT,3,OVER,EQUAL,ZBRANCH,CL4
+        dq DROP,COMPILE,ATLOC3,BRANCH,CLEX
+CL4:    dq LIT,4,OVER,EQUAL,ZBRANCH,CL5
+        dq DROP,COMPILE,ATLOC4,BRANCH,CLEX
+CL5:    dq LIT,5,OVER,EQUAL,ZBRANCH,CL6
+        dq DROP,COMPILE,ATLOC5,BRANCH,CLEX
+CL6:    dq LIT,6,OVER,EQUAL,ZBRANCH,CL7
+        dq DROP,COMPILE,ATLOC6,BRANCH,CLEX
+CL7:    dq LIT,7,OVER,EQUAL,ZBRANCH,CLEX
+        dq DROP,COMPILE,ATLOC7;,BRANCH,CLEX
+CLEX:   dq LIT,1,LOCOFFSET,PLUSSTORE
+        dq COMPILE,EXIT
+        dq EXIT
+
+defword "(LOCAL)",7,0,PARENSLOCAL
+        dq TWODUP,LIT,0,LIT,0,DEQ,ZBRANCH,PLOC1
+        dq TWODROP,FFALSE,LSTATE,FSTORE
+        dq STOPLOCALS,LIT,0,LOCCNT,FSTORE,EXIT
+PLOC1:  dq LSTATE,FETCH,ZEQ,ZBRANCH,PLOC2
+        dq FTRUE,LSTATE,FSTORE,STARTLOCALS
+PLOC2:  dq CREATELOCAL,EXIT
+
+defword "LOCAL",5,0,LOCAL
+        dq BLF,WORDF,COUNT,PARENSLOCAL
+        dq EXIT
+
+defword "{HELPER",7,0,BHELPER
+        dq TOIN,FETCH,BLF,WORDF,COUNT,LIT,1,EQUAL
+        dq SWAP,FETCHBYTE,LIT,125,EQUAL,ANDF
+        dq ZBRANCH,HLP1
+        dq DROP,TOIN,FETCH,BRANCH,HLP2
+HLP1:   dq LIT,1,LOCCNT,PLUSSTORE,BHELPER
+        dq SWAP,TOIN,FSTORE,LOCAL
+HLP2:   dq EXIT
+
+defword "{",1,F_IMMED,BRACE
+        dq BHELPER,TOIN,FSTORE
+        dq LIT,0,LIT,0,PARENSLOCAL
         dq EXIT
 
 defcode "FOO",3,,FOO
@@ -4896,6 +5325,16 @@ defcode "SLEEP",5,0,SLEEP
         call [Sleep]
         mov rsp, r15
         NEXT
+
+defword "ISP",3,0,ISP
+       dq LIT,1
+ISP1:  dq ONEPLUS,TWODUP,MODF,ZEQ
+       dq ZBRANCH,ISP2
+       dq TWODROP,LIT,0,EXIT
+ISP2:  dq TWODUP,DUPF,MULF,LTE
+       dq ZBRANCH,ISP1
+       dq TWODROP,LIT,-1
+       dq EXIT
 
 defcode "FIB",3,0,FFIB
         pop rcx
@@ -4948,8 +5387,19 @@ defword "TEST",4,0,TESTF,rootlink
         dq LIT,1,DOT
         dq EXIT
 
+defvoc "LOC-VOC",7,0,LOCVOC,0
 defvoc "ROOT",4,0,ROOT,name_FORTH
 defvoc "FORTH",5,0,FORTH,name_FDUMP,rootlink
+
+defword "VOCABS",6,0,VOCABS
+        dq VOCLINK
+VBEG:   dq FETCH,QDUP
+        dq ZBRANCH,VEND
+        dq DUPF,CELLPLUS,COUNT,TYPEF,SPACE
+        dq TCFA,LIT,4,CELLS,PLUS
+        dq BRANCH,VBEG
+VEND:   dq CR
+        dq EXIT
 
 defword "DUMP",4,0,FDUMP
 ; ( a u -- )
@@ -5124,6 +5574,7 @@ section '.idata' import data readable writeable
      floor,'floor',\
      ceil,'ceil',\
      _fabs,'fabs',\
+     puts,'puts',\
      printf,'printf'
 
   import ucrtbase,\
