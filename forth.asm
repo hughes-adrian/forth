@@ -3650,6 +3650,7 @@ defword "THROW",5,0,THROW
 ;       R> (EXCEPTION-HANDLER) ! 
 ;       R> SWAP >R SP! DROP R>
 ;      THEN ;
+        dq EXCHANDLER,FETCH,ZEQ,ZBRANCH,TH2
         dq DUPF,LIT,-1,EQUAL,ZBRANCH,TH2
         dq QUIT
 TH2:
@@ -3663,7 +3664,7 @@ defword "ABORT",5,0,ABORT
 ; ( i*x -- ) (R: j*x -- )
 ; -1 THROW ;
     dq LIT,-1,THROW
-        ;dq EXIT
+    dq EXIT
 
 defword 'ABORT"',6,F_IMMED,QABORT
 ; ( ccc" | f -- )
