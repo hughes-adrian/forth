@@ -373,19 +373,24 @@ DOCOL:
     add rax, 8
     mov IP, rax
     NEXT
+DOCOL2:
+    PUSHRSP IP
+    add rax, 8
+    mov IP, rax
+    NEXT
 DOVAR:
     add     rax, 16
     push    rax
     NEXT
 DOVAL:
     ;add     rax, 8
-    push    qword [rax+8]
+    push    qword [rax+16]
     NEXT
 DO2VAL:
     ;add     rax, 16
-    push    qword [rax+16]
+    push    qword [rax+24]
     ;sub     rax, 8
-    push    qword [rax+8]
+    push    qword [rax+16]
     NEXT
 DOCONST:
     ;add     rax, 8
@@ -547,6 +552,7 @@ defconst "VERSION",7,0,VERSION,ADRIAN_VERSION
 defconst "R0",2,0,RZ,return_stack_top
 defconst "WBUF",4,0,WBUF,word_buffer
 defconst "DOCOL",5,0,__DOCOL,DOCOL
+defconst "DOCOL2",6,0,__DOCOL2,DOCOL2
 defconst "DOVAR",5,0,__DOVAR,DOVAR
 defconst "DOVAL",5,0,__DOVAL,DOVAL
 defconst "DODOES",6,0,__DODOES,DODOES
@@ -679,16 +685,16 @@ defcode "BYE",3,0,BYE,rootlink
     mov    cl, 13
     call    _TX
     ;free the heap memory
-
     ;mov     rcx, qword [HeapHandle]
     ;mov     rdx, 0x0
     ;mov     r8, qword [HeapBase]
     ;sub     rsp, 32
     ;call    [HeapFree]   ; address of dictionary in rax
-    ;mov     rcx, qword [VirtualBase]
-    ;mov     rdx, 0x0
-    ;mov     r8, 0x8000
-    ;call    [VirtualFree]
+    ;free the virtual memory
+    mov     rcx, qword [VirtualBase]
+    mov     rdx, 0x0
+    mov     r8, 0x8000
+    call    [VirtualFree]
 
     add     rsp, 32
     mov     rbp, [BasePtr]
@@ -3131,7 +3137,7 @@ CFT1:   dq DROP,LIT,0
 
 defword ">BODY",5,0,TOBODY
 ; ( xt -- dfa )
-; undefined if used on a word created wth CREATE
+; undefined if used on a word not created wth CREATE
 ; CELL+ ;
         dq LIT,2,CELLS,PLUS
         dq EXIT
@@ -3219,7 +3225,9 @@ defword "VALUE",5,0,VALUE
 ; PARSE-NAME HEADER, COMPILE DOVAL , ;
         ;dq CREATE,COMMA,DOES,FETCH
         dq PARSENAME,HEADERCOMMA
-        dq LIT,DOVAL,COMMA,COMMA
+        dq LIT,DOVAL,COMMA
+        dq LIT,0,COMMA
+        dq COMMA
         dq EXIT
 
 defword "2VALUE",6,0,TWOVALUE
@@ -3229,6 +3237,7 @@ defword "2VALUE",6,0,TWOVALUE
         ;dq DUPF,FETCH,SWAP,CELLPLUS,FETCH
         dq PARSENAME,HEADERCOMMA
         dq LIT,DO2VAL,COMMA
+        dq LIT,0,COMMA
         dq COMMA,COMMA
         dq EXIT
 
@@ -3240,11 +3249,29 @@ defword "TO",2,F_IMMED,TOO
 ; ELSE
 ;   !
 ; THEN ;
-        dq TICK,TOBODY,STATE,FETCH,ZBRANCH,TO1
+        dq TICK,DUPF,FETCH,LIT,DOCOL2,EQUAL,ZBRANCH,TO3
+        dq CELLPLUS,FETCH
+        dq LIT,ATLOC0,OVER,EQUAL,ZBRANCH,TO4
+        dq DROP,COMPILE,TOLOC0,BRANCH,TOX
+TO4:    dq LIT,ATLOC1,OVER,EQUAL,ZBRANCH,TO5
+        dq DROP,COMPILE,TOLOC1,BRANCH,TOX
+TO5:    dq LIT,ATLOC2,OVER,EQUAL,ZBRANCH,TO6
+        dq DROP,COMPILE,TOLOC2,BRANCH,TOX
+TO6:    dq LIT,ATLOC3,OVER,EQUAL,ZBRANCH,TO7
+        dq DROP,COMPILE,TOLOC3,BRANCH,TOX
+TO7:    dq LIT,ATLOC4,OVER,EQUAL,ZBRANCH,TO8
+        dq DROP,COMPILE,TOLOC4,BRANCH,TOX
+TO8:    dq LIT,ATLOC5,OVER,EQUAL,ZBRANCH,TO9
+        dq DROP,COMPILE,TOLOC5,BRANCH,TOX
+TO9:    dq LIT,ATLOC6,OVER,EQUAL,ZBRANCH,TO10
+        dq DROP,COMPILE,TOLOC6,BRANCH,TOX
+TO10:   dq LIT,ATLOC7,OVER,EQUAL,ZBRANCH,TOX
+        dq DROP,COMPILE,TOLOC7,BRANCH,TOX
+TO3:    dq TOBODY,STATE,FETCH,ZBRANCH,TO1
         dq LITERAL,COMPILE,FSTORE
-        dq BRANCH,TO2
+        dq BRANCH,TOX
 TO1:    dq FSTORE
-TO2:    dq EXIT
+TOX:    dq EXIT
 
 defword "+TO",3,F_IMMED,PLUSTO
 ; ( x -- )
@@ -3345,7 +3372,7 @@ defword "UNHIDE",6,0,UNHIDE
 defword ":",1,0,COLON
 ; ( -- )
 ; BL WORD COUNT HEADER,
-; DOCOL , LATEST @ HIDDEN [ ;
+; DOCOL , LATEST @ HIDDEN ] ;
         dq BLF,WORDF,COUNT
         dq HEADERCOMMA,LIT,DOCOL
         ;dq COMMA,LATEST,FETCH
@@ -4986,6 +5013,46 @@ defword "GET-CURRENT",11,0,GETCURRENT
         dq CURRENT,FETCH
         dq EXIT
 
+defword ":NONAME",7,0,COLNONAME
+; :noname here docol , ] ;
+        dq HERE,LIT,DOCOL,COMMA,RBRAC
+        dq EXIT
+
+defword "DEFER",5,0,DEFER        
+; DEFER ( "name" -- )
+;   CREATE ['] ABORT ,
+;DOES> ( ... -- ... )
+;   @ EXECUTE ;
+        dq CREATE,LIT,ABORT,COMMA
+        dq DOES,FETCH,EXECUTE
+        dq EXIT
+
+defword "DEFER!",6,0,DEFERSTORE
+; DEFER! ( xt2 xt1 -- )
+;   >BODY ! ;
+        dq TOBODY,FSTORE
+        dq EXIT
+        
+defword "DEFER@",6,0,DEFERFETCH
+; DEFER@ ( xt1 -- xt2 )
+;   >BODY @ ;
+        dq TOBODY,FETCH
+        dq EXIT
+
+defword "IS",2,F_IMMED,IS
+; IS
+;   STATE @ IF
+;     POSTPONE ['] POSTPONE DEFER!
+;   ELSE
+;     ' DEFER!
+;   THEN ; IMMEDIATE
+        dq STATE,FETCH,ZBRANCH,IS1
+        dq BRACTICK
+        dq COMPILE,DEFERSTORE
+        dq BRANCH,IS2
+IS1:    dq TICK,DEFERSTORE
+IS2:    dq EXIT
+
 defcode "GO",2,0,INNER
         xor rax,rax
         mov rbx,100000
@@ -5271,7 +5338,7 @@ sto1:   dq LOCVEC,I,CELLS,PLUS,FETCH,COMMA
 stoex:  dq EXIT
 
 defword "CREATE-LOCAL",12,0,CREATELOCAL
-        dq HEADERCOMMA,LIT,DOCOL,COMMA
+        dq HEADERCOMMA,LIT,DOCOL2,COMMA
         dq LOCOFFSET,FETCH
         dq LIT,0,OVER,EQUAL,ZBRANCH,CL1
         dq DROP,COMPILE,ATLOC0,BRANCH,CLEX
