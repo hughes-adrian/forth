@@ -3275,17 +3275,43 @@ TOX:    dq EXIT
 
 defword "+TO",3,F_IMMED,PLUSTO
 ; ( x -- )
-; ' >BODY STATE ;
+; ' >BODY STATE @
 ; IF
 ;   LITERAL [COMPILE] +!
 ; ELSE
 ;   +!
 ; THEN ;
-        dq TICK,TOBODY,STATE,FETCH,ZBRANCH,PTO1
+        dq TICK,DUPF,FETCH,LIT,DOCOL2,EQUAL,ZBRANCH,PTO3
+        dq CELLPLUS,FETCH        
+        dq LIT,ATLOC0,OVER,EQUAL,ZBRANCH,PTO4
+        dq DROP,COMPILE,ATLOC0,COMPILE,PLUS
+        dq COMPILE,TOLOC0,BRANCH,PTOX
+PTO4:   dq LIT,ATLOC1,OVER,EQUAL,ZBRANCH,PTO5
+        dq DROP,COMPILE,ATLOC1,COMPILE,PLUS
+        dq COMPILE,TOLOC1,BRANCH,PTOX
+PTO5:   dq LIT,ATLOC2,OVER,EQUAL,ZBRANCH,PTO6
+        dq DROP,COMPILE,ATLOC2,COMPILE,PLUS
+        dq COMPILE,TOLOC2,BRANCH,PTOX
+PTO6:   dq LIT,ATLOC3,OVER,EQUAL,ZBRANCH,PTO7
+        dq DROP,COMPILE,ATLOC3,COMPILE,PLUS
+        dq COMPILE,TOLOC3,BRANCH,PTOX
+PTO7:   dq LIT,ATLOC4,OVER,EQUAL,ZBRANCH,PTO8
+        dq DROP,COMPILE,ATLOC4,COMPILE,PLUS
+        dq COMPILE,TOLOC4,BRANCH,PTOX
+PTO8:   dq LIT,ATLOC5,OVER,EQUAL,ZBRANCH,PTO9
+        dq DROP,COMPILE,ATLOC5,COMPILE,PLUS
+        dq COMPILE,TOLOC5,BRANCH,PTOX
+PTO9:   dq LIT,ATLOC6,OVER,EQUAL,ZBRANCH,PTO10
+        dq DROP,COMPILE,ATLOC6,COMPILE,PLUS
+        dq COMPILE,TOLOC6,BRANCH,PTOX
+PTO10:  dq LIT,ATLOC7,OVER,EQUAL,ZBRANCH,PTOX
+        dq DROP,COMPILE,ATLOC7,COMPILE,PLUS
+        dq COMPILE,TOLOC7,BRANCH,PTOX
+PTO3:   dq TOBODY,STATE,FETCH,ZBRANCH,PTO1
         dq LITERAL,COMPILE,PLUSSTORE
-        dq BRANCH,PTO2
+        dq BRANCH,PTOX
 PTO1:   dq PLUSSTORE
-PTO2:   dq EXIT
+PTOX:   dq EXIT
 
 defword "VARIABLE",8,0,VARIABLE
 ; ( -- )
@@ -4893,22 +4919,22 @@ defcode "FASIN",5,0,FASINF
 
  defcode "FLOOR",5,0,FLOORF
         FPOP xmm0
-    push rsi
-    sub rsp,40
+        push rsi
+        sub rsp,40
         call [floor]
-    add rsp,40
+        add rsp,40
         FPUSH xmm0
-    pop rsi
+        pop rsi
         NEXT
 
 defcode "CEIL",4,0,CEILF
         FPOP xmm0
-    push rsi
-    sub rsp,40
+        push rsi
+        sub rsp,40
         call [ceil]
-    add rsp,40
+        add rsp,40
         FPUSH xmm0
-    pop rsi
+        pop rsi
         NEXT
 
 defcode "FTRUNC",6,0,FTRUNCF
