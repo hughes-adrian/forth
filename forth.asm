@@ -8,6 +8,17 @@ include 'win64ax.inc'
 include 'exception.inc'
 IMAGE_DIRECTORY_ENTRY_EXCEPTION = 3 ; Exception Directory
 
+;; TODO
+;; relative jumps, not absolute
+;; buffered io, especially reading and readline
+;; move user variables to user vector and read from offsets
+;;   -> this is to aid threading
+;; investigate threading
+;; investigate mutlitasking (green threads) like F83
+;; finish the word SEE
+;; fix DUMP
+;; finish assembler vocabulary
+
 ; macros for NEXT inner interpreter and stack push/pop
 macro NEXT {
     lodsq       ; mov qw into rax from rsi and incr rsi
@@ -383,17 +394,16 @@ DOVAR:
     push    rax
     NEXT
 DOVAL:
-    ;add     rax, 8
-    push    qword [rax+16]
+    ;push    qword [rax+16]
+    push    qword [rax+8]
     NEXT
 DO2VAL:
-    ;add     rax, 16
-    push    qword [rax+24]
-    ;sub     rax, 8
+    ;push    qword [rax+24]
+    ;push    qword [rax+16]
     push    qword [rax+16]
+    push    qword [rax+8]
     NEXT
 DOCONST:
-    ;add     rax, 8
     push    qword [rax+8]
     NEXT
 DODOES:
@@ -490,7 +500,7 @@ defvar "CODESPACE",9,0,CSCC,codespace
 ;defvar "CONTEXT",7,0,CONTEXT,0
 defvar "(DEFAULT)",9,F_HIDDEN,PARDEFAULT
 ; create an array of vocs as if it was
-; created with variable context #vocs cells allot
+; created with ": variable context #vocs cells allot ;"
 label name_CONTEXT
     dq link              ; link
 link = name_CONTEXT
@@ -3226,7 +3236,7 @@ defword "VALUE",5,0,VALUE
         ;dq CREATE,COMMA,DOES,FETCH
         dq PARSENAME,HEADERCOMMA
         dq LIT,DOVAL,COMMA
-        dq LIT,0,COMMA
+        ;dq LIT,0,COMMA
         dq COMMA
         dq EXIT
 
@@ -3237,13 +3247,13 @@ defword "2VALUE",6,0,TWOVALUE
         ;dq DUPF,FETCH,SWAP,CELLPLUS,FETCH
         dq PARSENAME,HEADERCOMMA
         dq LIT,DO2VAL,COMMA
-        dq LIT,0,COMMA
+        ;dq LIT,0,COMMA
         dq COMMA,COMMA
         dq EXIT
 
 defword "TO",2,F_IMMED,TOO
 ; ( x -- )
-; ' >BODY STATE @
+; ' >DFA STATE @
 ; IF
 ;   LITERAL [COMPILE] !
 ; ELSE
@@ -3267,7 +3277,7 @@ TO9:    dq LIT,ATLOC6,OVER,EQUAL,ZBRANCH,TO10
         dq DROP,COMPILE,TOLOC6,BRANCH,TOX
 TO10:   dq LIT,ATLOC7,OVER,EQUAL,ZBRANCH,TOX
         dq DROP,COMPILE,TOLOC7,BRANCH,TOX
-TO3:    dq TOBODY,STATE,FETCH,ZBRANCH,TO1
+TO3:    dq TDFA,STATE,FETCH,ZBRANCH,TO1
         dq LITERAL,COMPILE,FSTORE
         dq BRANCH,TOX
 TO1:    dq FSTORE
@@ -3275,7 +3285,7 @@ TOX:    dq EXIT
 
 defword "+TO",3,F_IMMED,PLUSTO
 ; ( x -- )
-; ' >BODY STATE @
+; ' >DFA STATE @
 ; IF
 ;   LITERAL [COMPILE] +!
 ; ELSE
@@ -3307,7 +3317,7 @@ PTO9:   dq LIT,ATLOC6,OVER,EQUAL,ZBRANCH,PTO10
 PTO10:  dq LIT,ATLOC7,OVER,EQUAL,ZBRANCH,PTOX
         dq DROP,COMPILE,ATLOC7,COMPILE,PLUS
         dq COMPILE,TOLOC7,BRANCH,PTOX
-PTO3:   dq TOBODY,STATE,FETCH,ZBRANCH,PTO1
+PTO3:   dq TDFA,STATE,FETCH,ZBRANCH,PTO1
         dq LITERAL,COMPILE,PLUSSTORE
         dq BRANCH,PTOX
 PTO1:   dq PLUSSTORE
@@ -5120,7 +5130,7 @@ defcode "GETPROCADDR",11,0,GETPROC
 defcode "0CALL",5,0,FCALL0
         pop r8
         mov r15, rsp
-        sub rsp, 32
+        sub rsp, 40
         and spl, 0xF0
         call r8
         mov rsp, r15
@@ -5130,11 +5140,11 @@ defcode "0CALL",5,0,FCALL0
 defcode "1CALL",5,0,FCALL1
         pop r8
         pop rcx
-        mov r15, rsp
-        sub rsp, 32
-        and spl, 0xF0
+        ;mov r15, rsp
+        ;sub rsp, 40
+        ;and spl, 0xF0
         call r8
-        mov rsp, r15
+        ;mov rsp, r15
         push rax
         NEXT
 
