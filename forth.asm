@@ -21,7 +21,7 @@ IMAGE_DIRECTORY_ENTRY_EXCEPTION = 3 ; Exception Directory
 
 ; macros for NEXT inner interpreter and stack push/pop
 macro NEXT {
-    lodsq       ; mov qw into rax from rsi and incr rsi
+    lodsq             ; mov qw into rax from rsi and incr rsi
     jmp qword [rax]   ; jump to location in rax
     ;mov rbx, qword [rax]
     ;jmp rbx
