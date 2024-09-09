@@ -378,16 +378,16 @@ defvar "LSTATE",6,0,LSTATE,0 ; false
 defvar "LOC-FRAME",9,0,LOCFRAME,0 ; false
 
 defconst "VERSION",7,0,VERSION,71;ADRIAN_VERSION
-;defconst "R0",2,0,RZ,return_stack_top
-;defconst "WBUF",4,0,WBUF,word_buffer
-;defconst "DOCOL",5,0,__DOCOL,DOCOL
-;defconst "DOCOL2",6,0,__DOCOL2,DOCOL2
-;defconst "DOVAR",5,0,__DOVAR,DOVAR
-;defconst "DOVAL",5,0,__DOVAL,DOVAL
-;defconst "DODOES",6,0,__DODOES,DODOES
-;defconst "F_IMMED",7,0,__F_IMMED,F_IMMED
-;defconst "F_HIDDEN",8,0,__F_HIDDEN,F_HIDDEN
-;defconst "F_LENMASK",9,0,__F_LENMASK,F_LENMASK   
+defconst "R0",2,0,RZ,return_stack_top
+defconst "WBUF",4,0,WBUF,word_buffer
+defconst "DOCOL",5,0,__DOCOL,DOCOL
+defconst "DOCOL2",6,0,__DOCOL2,DOCOL2
+defconst "DOVAR",5,0,__DOVAR,DOVAR
+defconst "DOVAL",5,0,__DOVAL,DOVAL
+defconst "DODOES",6,0,__DODOES,DODOES
+defconst "F_IMMED",7,0,__F_IMMED,F_IMMED
+defconst "F_HIDDEN",8,0,__F_HIDDEN,F_HIDDEN
+defconst "F_LENMASK",9,0,__F_LENMASK,F_LENMASK   
 
 defword "?RX",3,0,QRX
 ; ( -- ch T | F )
@@ -502,7 +502,37 @@ defword "BYE",3,0,BYE
     call    [ExitProcess]
 
 defword "QUIT",4,0,QUIT
-    NEXT
+; ( -- )
+; R0 RP! 0 STATE !
+; S0 @ SP!
+; F0 @ FP!
+; BEGIN
+;   QUERY SPACE
+;   SOURCE INTERPRET
+;   STATE @ 0= IF ." OK" THEN CR
+; AGAIN ;
+QUIT0:  def CR,RZ,RSPSTORE,LIT,0,STATE,FSTORE
+        def S0,FETCH,DSPSTORE
+        def F0,FETCH,FSPSTORE
+QUIT1:  def QUERY,SPACE
+        def SOURCE,INTERPRET
+        def STATE,FETCH,LIT,0,EQUAL
+        def ZBRANCH
+        dq QUIT2-$
+        def SAYOK
+        def DEPTH,ZBRANCH
+        dq QUIT3-$
+        def LIT,58,EMIT,DEPTH,DOT
+        def BRANCH
+        dq QUIT4-$
+QUIT3:  def SPACE
+QUIT4:  def FDEPTH,ZBRANCH
+        dq QUIT2-$
+        def LIT,102,EMIT,LIT,58,EMIT
+        def FDEPTH,DOT
+QUIT2:  def CR,BRANCH
+        dq QUIT1-$
+        NEXT
 
 defword "BRANCH",6,0,BRANCH
         mov    rax, [rsp]
@@ -612,7 +642,162 @@ defword "SP@",3,0,DSPFETCH
     PUSHSP   DSP
     NEXT
 
+defword "SP!",3,0,DSPSTORE
+    POPSP    DS
+    NEXT
 
+defword "FSP@",4,0,FSPFETCH
+    PUSHSP   FSP
+    NEXT
+
+defword "FSP!",4,0,FSPSTORE
+    POPSP    FSP
+    NEXT
+
+defword "0<",2,0,ZLT
+    POPSP   rax
+    mov     rcx, -1
+    mov     rbx, 0
+    cmp     rax, rbx
+    cmovl   rbx, rcx
+    PUSHSP  rbx
+    NEXT
+
+defword "AND",3,0,ANDF
+    POPSP   rax
+    POPSP   rbx
+    and     rax, rbx
+    PUSHSP  rax
+    NEXT
+
+defword "OR",2,0,ORF
+    POPSP   rax
+    POPSP   rbx
+    or      rax,rbx
+    PUSHSP  rax
+    NEXT
+
+defword "XOR",3,0,XORF
+    POPSP   rax
+    POPSP   rbx
+    xor     rax,rbx
+    PUSHSP  rax
+    NEXT
+
+defword "INVERT",6,0,INVERT
+    POPSP   rax
+    not     rax
+    PUSHSP  rax
+    NEXT
+
+defword "UM+",3,0,UMPLUS
+    POPSP   rbx
+    POPSP   rax
+    xor     rcx, rcx
+    clc ; clear carry flag
+    mov     rdx, 1
+    xor     rcx, rcx
+    add     rax, rbx
+    cmovc   rcx, rdx
+    PUSHSP  rax
+    PUSHSP  rcx
+    NEXT
+
+defword "OV+",3,0,OVPLUS
+    mov     rax, 0x0
+    inc     rax ; clear OF flag
+    xor     rcx, rcx
+    mov     rdx, 1
+    POPSP   rax
+    POPSP   rbx
+    add     rax, rbx
+    cmovo   rcx, rdx  ; tests for OF flag
+    PUSHSP  rax
+    PUSHSP  rcx
+    NEXT
+
+defword "LSHIFT",6,0,LSHIFT
+    POPSP   rcx
+    POPSP   rax
+    shl     rax, cl
+    PUSHSP  rax
+    NEXT
+
+defword "RSHIFT",6,0,RSHIFT
+    POPSP   rcx
+    POPSP   rax
+    shr     rax, cl
+    PUSHSP  rax
+    NEXT
+
+defword "DO$",3,0,DOSTRING
+; R@ DUP 8+ SWAP @ ( a u )
+; R> OVER ( a u b u )
+; + ALIGNED 8+ ( a u b+u+8+pad )
+; >R ( put next instruction onto return stack )
+        def RFETCH,DUPF,LIT
+        dq  8
+        def PLUS,SWAP,FETCH
+        def FROMR,OVER,PLUS,ALIGNED
+        def LIT
+        dq  8
+        def PLUS,TOR
+        NEXT
+
+defword "LITSTRING",9,0,LITSTRING
+; R@ DUP 8+ SWAP ; ( a u )
+; R> OVER ( a u b u )
+; + ALIGNED 8+ ( a u b+u+4+pad )
+; >R ( put next instruction onto return stack )
+        def RFETCH,DUPF,LIT
+        dq  8
+        def PLUS,SWAP,FETCH
+        def FROMR,OVER,PLUS,ALIGNED
+        def LIT
+        dq  8
+        def PLUS,TOR
+        NEXT
+
+defword "DOP$",4,0,DOPSTRING
+; R@ DUP C@ OVER ( a u a )
+; + 1+ ALIGNED ( a b+u+1+pad )
+; >R ( put next instruction onto return stack )
+        def RFETCH,DUPF,FETCHBYTE,OVER
+        def PLUS,LIT
+        dq  1
+        def PLUS,ALIGNED
+        def TOR
+        NEXT
+
+defword "?DUP",4,0,QDUP
+; DUP IF DUP THEN ;
+        mov rax, [DS]
+        cmp rax, 0
+        je @f
+        PUSHSP rax
+@@:     NEXT
+
+defword "ROT",3,0,ROT       
+; >R SWAP R> SWAP ;
+        POPSP rax
+        POPSP rbx
+        POPSP rcx
+        PUSHSP rbx
+        PUSHSP rax
+        PUSHSP rcx
+        NEXT
+
+defword "-ROT",4,0,MROT
+; ROT ROT ; 
+        ;dq ROT,ROT
+        ;dq EXIT
+        pop rax
+        pop rbx
+        pop rcx
+        push rax
+        push rcx
+        push rbx
+        NEXT
 
 defvoc "LOC-VOC",7,0,LOCVOC,0
 defvoc "ROOT",4,0,ROOT,name_FORTH
