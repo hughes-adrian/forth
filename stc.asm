@@ -197,9 +197,12 @@ start:
     mov     r9, 0x40
     call    [VirtualAlloc]
     mov     [VirtualBase], rax
-    ;mov     [var_FDP], rax
+    mov     [var_FDP], rax
     mov     [HeapBase], rax
 
+    ; save base of return stack to R0 - we will use the default system stack
+    mov     [var_RZ], RS
+    
     ; save base of data stack to DSP
     mov     DSP, data_stack_top
     
@@ -295,7 +298,7 @@ cold:
 
 defvar "STATE",5,0,STATE,70
 defvar "DP",2,0,FDP,0
-defvar "S0",2,0,S0,0
+defvar "S0",2,0,S0,data_stack_top
 defvar "F0",2,0,F0,float_stack_top
 defvar "BASE",4,0,BASE,10
 defvar "TIB",3,0,TIB,buffer
@@ -378,10 +381,10 @@ defvar "LSTATE",6,0,LSTATE,0 ; false
 defvar "LOC-FRAME",9,0,LOCFRAME,0 ; false
 
 defconst "VERSION",7,0,VERSION,71;ADRIAN_VERSION
-defconst "R0",2,0,RZ,return_stack_top
+defconst "R0",2,0,RZ,0
 defconst "WBUF",4,0,WBUF,word_buffer
-defconst "DOCOL",5,0,__DOCOL,DOCOL
-defconst "DOCOL2",6,0,__DOCOL2,DOCOL2
+;defconst "DOCOL",5,0,__DOCOL,DOCOL
+;defconst "DOCOL2",6,0,__DOCOL2,DOCOL2
 defconst "DOVAR",5,0,__DOVAR,DOVAR
 defconst "DOVAL",5,0,__DOVAL,DOVAL
 defconst "DODOES",6,0,__DODOES,DODOES
@@ -457,6 +460,12 @@ defword "DOCONST",7,0,DOCONST
 defword "DOVAR",5,0,DOVAR
     mov      rax, [rsp]
     add      qword [rsp],16
+    add      rax, 8
+    PUSHSP   rax
+    NEXT
+
+defword "DOVAL",5,0,DOVAL
+    mov      rax, [rsp]
     add      rax, 8
     PUSHSP   rax
     NEXT
@@ -643,7 +652,7 @@ defword "SP@",3,0,DSPFETCH
     NEXT
 
 defword "SP!",3,0,DSPSTORE
-    POPSP    DS
+    POPSP    DSP
     NEXT
 
 defword "FSP@",4,0,FSPFETCH
@@ -771,7 +780,7 @@ defword "DOP$",4,0,DOPSTRING
 
 defword "?DUP",4,0,QDUP
 ; DUP IF DUP THEN ;
-        mov rax, [DS]
+        mov rax, [DSP]
         cmp rax, 0
         je @f
         PUSHSP rax
@@ -791,12 +800,158 @@ defword "-ROT",4,0,MROT
 ; ROT ROT ; 
         ;dq ROT,ROT
         ;dq EXIT
-        pop rax
-        pop rbx
-        pop rcx
-        push rax
-        push rcx
-        push rbx
+        POPSP rax
+        POPSP rbx
+        POPSP rcx
+        PUSHSP rax
+        PUSHSP rcx
+        PUSHSP rbx
+        NEXT
+
+defword "ROLL",4,0,ROLL
+; ( xn ... x0  m -- xn-1 ... x0 xn )
+; DUP 0<= IF DROP ELSE SWAP >R 1- RECURSE R> SWAP THEN ;
+        def DUPF,ZLTEQ,ZBRANCH
+        dq ROL1-$
+        def DROP,BRANCH
+        dq ROL2-$
+ROL1:   def SWAP,TOR,ONEMINUS,ROLL,FROMR,SWAP
+ROL2:   NEXT
+
+defword "2DROP",5,0,TWODROP
+; DROP DROP ;
+        ;dq DROP,DROP
+        ;dq EXIT
+        add DSP, 16
+        NEXT
+
+defword "2DUP",4,0,TWODUP
+; OVER OVER ;
+        ;dq OVER,OVER
+        ;dq EXIT
+        mov rax, [DSP]
+        mov rbx, [DSP+8]
+        PUSHSP rbx
+        PUSHSP rax
+        NEXT
+
+defword "2OVER",5,0,TWOOVER
+; >R 2DUP R> ROT ROT ;
+        ;dq TOR,TWODUP,FROMR,ROT,ROT
+        ;dq EXIT
+        mov rax, [DSP+16]
+        mov rbx, [DSP+24]
+        PUSHSP rbx
+        PUSHSP rax
+        NEXT
+
+defword "2SWAP",5,0,TWOSWAP
+; ROT >R ROT R>
+        ;dq ROT,TOR,ROT,FROMR
+        ;dq EXIT
+        mov rax, [DSP]
+        mov rbx, [DSP+8]
+        mov rcx, [DSP+16]
+        mov rdx, [DSP+24]
+        mov [DSP+16], rax
+        mov [DSP+24], rbx
+        mov [DSP],   rcx
+        mov [DSP+8], rdx
+        NEXT
+
+defword "2>R",3,0,TWOTOR
+; SWAP >R >R ;
+        def FROMR,MROT,SWAP,TOR,TOR,TOR
+        NEXT
+
+defword "2R>",3,0,TWOFROMR
+; R> R> SWAP ;
+        def FROMR,FROMR,FROMR,SWAP,ROT,TOR
+        NEXT
+
+defword "2R@",3,0,TWORFETCH
+; RSP; DUP ; SWAP CELL+ ; SWAP ;
+        def RSPFETCH,CELLPLUS,DUPF,FETCH,SWAP
+        def CELLPLUS,FETCH,SWAP
+        NEXT
+
+defword "NOT",3,0,NOTF
+; -1 XOR ;
+        ;dq LIT,-1,XORF
+        ;dq EXIT
+        POPSP rbx
+        sub rbx, 1
+        sbb rbx, rbx
+        PUSHSP rbx
+        NEXT
+
+defword "NEGATE",6,0,NEGATE
+; NOT 1 + ;
+        ;dq NOTF,LIT,1,PLUS
+        ;dq EXIT
+        mov rax, [DSP]
+        neg rax
+        mov [DSP], rax
+        NEXT
+
+defword "DNEGATE",7,0,DNEGATE
+; NOT >R NOT 1 UM+ R> + ;
+        def NOTF,TOR,NOTF,LIT,1,UMPLUS,FROMR,PLUS
+        NEXT
+
+defword "+",1,0,PLUS
+; UM+ DROP ;
+    POPSP     rax
+    ;add     rax, [DS]
+    ;mov     [DS], rax
+    add [DSP],rax
+    NEXT    
+
+defword "D+",2,0,DPLUS
+; >R SWAP >R UM+ R> R> + + ; 
+        def TOR,SWAP,TOR,UMPLUS
+        def FROMR,FROMR,PLUS,PLUS
+        NEXT
+
+defword "-",1,0,MINUS
+    POPSP   rax
+    POPSP   rbx
+    sub     rbx, rax 
+    PUSHSP  rbx
+    NEXT 
+
+defword "D-",2,0,DMINUS
+; DNEGATE D+ ;
+        def DNEGATE,DPLUS
+        NEXT
+
+defword "ABS",3,0,ABSF
+; DUP 0< IF NEGATE THEN ;
+        ;dq DUPF,ZLT,ZBRANCH,ABS1
+        ;dq NEGATE
+;ABS1:   dq EXIT
+        mov rax, [DSP]
+        mov rcx, rax
+        sar rcx, 63
+        xor rax, rcx
+        sub rax, rcx
+        mov [DSP], rax
+        NEXT
+
+defword "=",1,0,EQUAL
+; ( w w -- t )
+; XOR IF 0 EXIT THEN -1 ;
+;        dq XORF,ZBRANCH,EQ1
+;        dq LIT,0
+;        dq EXIT
+;EQ1:    dq LIT,-1
+;        dq EXIT
+        POPSP rbx
+        POPSP rax
+        sub rbx, rax
+        sub rbx, 1
+        sbb rbx, rbx
+        PUSHSP rbx
         NEXT
 
 defvoc "LOC-VOC",7,0,LOCVOC,0
