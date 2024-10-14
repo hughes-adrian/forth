@@ -1921,7 +1921,6 @@ defword "EXTRACT",7,0,EXTRACT
      dq SWAP,DIGIT
      dq EXIT
 
-
 defword "HOLD",4,0,HOLD
 ; ( c -- ) 
 ; HLD @ 1 - DUP HLD ! C! ;
@@ -3046,7 +3045,6 @@ defword "SOURCE",6,0,SOURCE
 ; TIB ; #TIB ; ;
         dq TIB,FETCH,NTIB,FETCH,EXIT
         ;dq TIB,NTIB,FETCH,EXIT
-
 
 defword "CR",2,0,CR
 ; ( -- )
