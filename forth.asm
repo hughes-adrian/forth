@@ -254,7 +254,6 @@ section '.text' code readable executable
     ; add     rsp, 32
 
     mov rax, [ARGV+16]
-    push rax
     mov     [var_S0], DS
 
     cmp byte [rax], 34 ; compare first char to double quote "
@@ -315,6 +314,8 @@ endd:
     mov LSP, LOCSTACK+4096*8
     mov LBP, LSP ; base pointer starts at TOS
 
+    sub     rsp, 32
+    and     spl, 0xF0   ; align the stack
     lea     IP, [cold]  ; now start FORTH from cold start
     NEXT
     ; should never reach this!
@@ -4249,7 +4250,9 @@ defcode "OPEN-FILE",9,0,OPENFILE
     rep     movsb  ; move the string to PAD
     mov     byte [rdi], 0
     
-    sub     rsp, 32 + 4*8
+    mov     r15, rsp
+    sub     rsp, 48 + 4*8
+    and     spl, 0xF0
     mov     rcx, r8 ; filename
     ;mov     rdx, rax
     mov     r8, 1 ; file_shared_read
@@ -4258,7 +4261,7 @@ defcode "OPEN-FILE",9,0,OPENFILE
     mov     qword [rsp + 5*8], 128 ; file_attribute_normal
     mov     qword [rsp + 6*8], 0; NULL 
     call    [CreateFileA]
-    add     rsp, 32 + 4*8
+    mov     rsp, r15
     pop     rsi ; restore IP
     
     cmp     rax, 0
@@ -4275,13 +4278,17 @@ operr:
 defcode "CLOSE-FILE",10,0,CLOSEFILE
 ; ( fd -- ior )
     pop     rcx
+    ;mov rax, 1
+    mov     r15, rsp
+    sub     rsp, 48
+    and     spl, 0xF0
     call    [CloseHandle]
+    mov     rbx, 0
+    mov     rcx, -1
     cmp     rax, 0
-    je      clerr
-    push    0
-    NEXT
-clerr:
-    push    -1
+    cmovne  rbx, rcx
+    mov     rsp, r15
+    push    rbx
     NEXT
 
 
@@ -4317,17 +4324,20 @@ defcode "READ-FILE",9,0,READFILE
     pop r8
     pop rdx
     lea r9, [Written]
-    sub rsp, 32 + 2*8
+    mov r15, rsp
+    sub rsp, 48 + 4*8
+    and spl, 0xF0
     mov qword [rsp + 4*8], 0
     call    [ReadFile]
-    add rsp, 32 + 2*8
     cmp rax, 0
     je  rderr
     mov rax, [Written]
+    mov rsp, r15
     push rax
     push 0
     NEXT
 rderr:
+    mov rsp, r15
     push 0
     push rax
     NEXT
