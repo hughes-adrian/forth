@@ -9,7 +9,7 @@ include 'exception.inc'
 IMAGE_DIRECTORY_ENTRY_EXCEPTION = 3 ; Exception Directory
 
 ;; TODO
-;; relative jumps, not absolute
+;; relative jumps, not absolute - done
 ;; buffered io, especially reading and readline
 ;; move user variables to user vector and read from offsets
 ;;   -> this is to aid threading
@@ -3865,7 +3865,7 @@ defword "UNTIL",5,F_IMMED,UNTIL
 ; ( a -- )
 ; COMPILE ?BRANCH <RESOLVE ; IMMEDIATE
          ;dq COMPILE,ZBRANCH,BRESOLVE,EXIT
-         dq LIT,ZBRANCH,COMMA,COMMA,EXIT
+         dq LIT,ZBRANCH,COMMA,HERE,MINUS,COMMA,EXIT
 
 defword "AGAIN",5,F_IMMED,AGAIN
 ; ( a -- )
