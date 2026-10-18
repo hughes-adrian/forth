@@ -132,7 +132,7 @@ ADRIAN_VERSION             = 1
 return_stack_size          = 8192
 float_stack_size           = 4096
 buffer_size                = 4096
-initial_data_segment_size  = 262144
+initial_data_segment_size  = 262144*100
 
 DS equ rsp
 RS equ rbp
@@ -540,7 +540,7 @@ label var_LOCSTACK
 
 label name_LOCVEC
     dq link              ; link
-link = name_CONTEXT
+link = name_LOCVEC
     db 6+F_HIDDEN             ; flags + length byte
     db "LOCVEC"                ; the name
     align 8              ; padding to next 4 byte boundary
@@ -3969,7 +3969,9 @@ defword "WHILE",5,F_IMMED,WHILEF
 defcode "(DO)",4,0,PARENSDO
     pop     rbx
     pop     rdx
+    mov rcx, IP
     lodsq
+    add rax, rcx ; now abs addr to end of loop
     PUSHRSP rax ; put exit addr in RS and skip
     PUSHRSP rdx ; limit
     PUSHRSP rbx ; index
@@ -3978,7 +3980,9 @@ defcode "(DO)",4,0,PARENSDO
 defcode "(?DO)",5,0,PARENSQDO
     pop     rbx
     pop     rdx
+    mov rcx, IP
     lodsq
+    add rax, rcx ; now abs addr to end of loop
     cmp     rbx, rdx
     je      QDOEND
     PUSHRSP rax ; put exit addr in RS and skip
@@ -5001,12 +5005,12 @@ defword "ORDER",5,0,ORDER,rootlink
 ; cr ." current: " current @ cell+ @ cell+ count type cr ;
         dq CR,DOSTRING,9
         db "context: ",0,0,0,0,0,0,0
-        dq TYPEF,NVOCS,LIT,0,PARENSDO,ORD1
+        dq TYPEF,NVOCS,LIT,0,PARENSDO,ORD1-$
 ORD0:   dq CONTEXT,I,CELLS,PLUS,FETCH
         dq QDUP,ZBRANCH,ORD2-$
         dq CELLPLUS,FETCH,CELLPLUS
         dq COUNT,TYPEF,SPACE
-ORD2:   dq PARENSLOOP,ORD0
+ORD2:   dq PARENSLOOP,ORD0-$
 ORD1:   dq CR,DOSTRING,9
         db "current: ",0,0,0,0,0,0,0
         dq TYPEF,CURRENT,FETCH,CELLPLUS
@@ -5016,38 +5020,38 @@ ORD1:   dq CR,DOSTRING,9
 
 defword "ALSO",4,0,ALSO
         dq LIT,1,NVOCS,LIT,2,MINUS
-        dq PARENSDO,ALS1
+        dq PARENSDO,ALS1-$
 ALS0:   dq CONTEXT,I,CELLS,PLUS,DUPF,CELLMINUS,FETCH
         dq SWAP,FSTORE,LIT,-1
-        dq PARENSPLUSLOOP,ALS0
+        dq PARENSPLUSLOOP,ALS0-$
 ALS1:   dq EXIT
 
 defword "PREVIOUS",8,0,PREVIOUS
         dq LIT,0,CONTEXT,NVOCS,LIT,1,MINUS
         dq CELLS,PLUS,FSTORE
         dq NVOCS,LIT,1,MINUS,LIT,0
-        dq PARENSDO,PREV1
+        dq PARENSDO,PREV1-$
 PREV0:  dq CONTEXT,I,CELLS,PLUS,DUPF,CELLPLUS
         dq FETCH,SWAP,FSTORE
-        dq PARENSLOOP,PREV0
+        dq PARENSLOOP,PREV0-$
 PREV1:  dq EXIT
 
 defword "ONLY",4,0,ONLY
         dq NVOCS,LIT,0
-        dq PARENSDO,ONL1
+        dq PARENSDO,ONL1-$
 ONL0:   dq LIT,0,CONTEXT,I,CELLS,PLUS,FSTORE
-        dq PARENSLOOP,ONL0
+        dq PARENSLOOP,ONL0-$
 ONL1:   dq ROOT,ALSO
         dq EXIT
 
 defword "GET-ORDER",9,0,GETORDER
 ; ( -- voc1 ... vocn n )
         dq DEPTH,TOR,LIT,0,NVOCS,LIT,1,MINUS
-        dq PARENSDO,GORD1
+        dq PARENSDO,GORD1-$
 GORD0:  dq CONTEXT,I,CELLS,PLUS,FETCH
         dq QDUP,ZBRANCH,GORD2-$
         ;dq
-GORD2:  dq LIT,-1,PARENSPLUSLOOP,GORD0
+GORD2:  dq LIT,-1,PARENSPLUSLOOP,GORD0-$
 GORD1:  dq DEPTH,FROMR,MINUS
         dq EXIT
 
@@ -5354,7 +5358,7 @@ defword "RESET-LOCALS",12,F_IMMED,RESETLOCALS
         dq LIT,0,LOCOFFSET,FSTORE
         dq FFALSE,LOCFLG,FSTORE
         dq FFALSE,LOCFRAME,FSTORE
-        dq LIT,0,CONTEXT,FETCH,FSTORE
+        ;dq LIT,0,CONTEXT,FETCH,FSTORE
         dq LIT,0,LP,FSTORE
         dq PREVIOUS,DEFINITIONS
 resloc: dq EXIT
@@ -5372,12 +5376,12 @@ defword "STOP-LOCALS",11,0,STOPLOCALS
         dq HERE,LP,FSTORE
         dq OLDDP,FETCH,FDP,FSTORE
         dq LOCFRAME,FETCH,ZEQ,ZBRANCH,stoloc-$
-        ;dq LIT,LOCINIT,COMMA
+        dq LIT,LOCINIT,COMMA
         dq FTRUE,LOCFRAME,FSTORE
 stoloc: dq LOCCNT,FETCH,LIT,0
-        dq PARENSQDO,stoex
+        dq PARENSQDO,stoex-$
 sto1:   dq LOCVEC,I,CELLS,PLUS,FETCH,COMMA
-        dq PARENSLOOP,sto1
+        dq PARENSLOOP,sto1-$
 stoex:  dq EXIT
 
 defword "CREATE-LOCAL",12,0,CREATELOCAL
@@ -5531,7 +5535,7 @@ defword "DUMP",4,0,FDUMP
 ; LOOP cr
 ; R> base ! DROP ;
         dq BASE,FETCH,TOR,LIT,0,TOR
-        dq LIT,0,PARENSDO,DUMEX
+        dq LIT,0,PARENSDO,DUMEX-$
 DUM1:   dq I,LIT,16,MODF,ZEQ,ZBRANCH,DUM2-$
         dq CR,DUPF,I,PLUS,LIT,1,HEX,UDOTR,DECIMAL,LIT,58,EMIT
 DUM2:   dq SPACE,DUPF,I,PLUS,FETCHBYTE,DUPF,LIT,16,LTF
@@ -5541,15 +5545,15 @@ DUM3:   dq LIT,1,HEX,DOTR,DECIMAL
         dq I,ONEPLUS,LIT,4,MODF,ZEQ,ZBRANCH,DUM4-$
         dq SPACE
 DUM4:   dq I,ONEPLUS,LIT,16,MODF,ZEQ,ZBRANCH,DUM5-$
-        dq SPACE,LIT,124,EMIT,LIT,16,LIT,0,PARENSDO,DUMEX2
+        dq SPACE,LIT,124,EMIT,LIT,16,LIT,0,PARENSDO,DUMEX2-$
 DUM6:   dq DUPF,J,PLUS,I,PLUS,LIT,15,MINUS,FETCHBYTE
         dq DUPF,LIT,32,LIT,128,WITHIN,ZBRANCH,DUM7-$
         dq EMIT,BRANCH,DUM8-$
 DUM7:   dq DROP,LIT,46,EMIT
-DUM8:   dq PARENSLOOP,DUM6
+DUM8:   dq PARENSLOOP,DUM6-$
 DUMEX2:
         dq LIT,124,EMIT
-DUM5:   dq PARENSLOOP,DUM1
+DUM5:   dq PARENSLOOP,DUM1-$
 DUMEX:  dq CR,RDROP,FROMR,BASE,FSTORE,DROP
         dq EXIT
 ex_handl_end:
